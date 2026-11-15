@@ -8,7 +8,7 @@
  */
 "use strict";
 (function () {
-  var VERSION = "1.21";
+  var VERSION = "1.22";
   var mode = null;          // null | "host" | "guest"
   var hostObj = null, localLink = null, peers = [], pending = null;
   var guestPc = null, guestDc = null;

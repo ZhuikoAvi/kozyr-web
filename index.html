@@ -114,8 +114,10 @@ h2{margin:0 0 8px;font-size:17px}
 .bank{position:absolute;top:30%;left:50%;transform:translateX(-50%);display:flex;align-items:flex-end;gap:4px;color:var(--gold);font-weight:800;font-size:13px}
 /* 3D от первого лица: вы сидите за столом — стол уходит вдаль, соперники за дальним краем, за ними комната */
 #game.m3d{background:linear-gradient(#2a1d14,#1a120c 45%,#0d0a07);background-size:cover;background-position:center top}
-#table.t3d{border:none;background:none!important;box-shadow:none;perspective:480px;perspective-origin:50% 10%;border-radius:0;overflow:visible;margin:0}
-#table.t3d .plane{position:absolute;left:-40%;right:-40%;top:40%;bottom:-8%;transform:rotateX(58deg);transform-origin:50% 100%;
+#table.t3d{border:none;background:none!important;box-shadow:none;perspective:480px;perspective-origin:50% 10%;border-radius:0;overflow:hidden;margin:0}
+.m3d .btns,.m3d .me{position:relative;z-index:6}
+#table.t3d.noroom .plane{top:24%}
+#table.t3d .plane{position:absolute;left:-40%;right:-40%;top:40%;bottom:0;transform:rotateX(58deg);transform-origin:50% 100%;
   border-radius:50% 50% 8% 8%/36% 36% 8% 8%;background:radial-gradient(ellipse at 50% 30%,#1e7a4b,#125a35 60%,#0c4227);background-size:cover;background-position:center;
   border:18px solid #5d3a1e;border-bottom:none;box-shadow:inset 0 0 60px rgba(0,0,0,.65)}
 #table.t3d .plane .center{left:32%;right:32%;top:8%;bottom:30%}
@@ -249,6 +251,20 @@ store.set("kz_id", me.id);
 
 var prof=(function(){try{return JSON.parse(store.get("kz_prof"))||null}catch(e){return null}})()||{coins:1000,by:{},streak:0,best:0,gifts:0,counted:[]};
 function saveProf(){store.set("kz_prof",JSON.stringify(prof))}
+// браузер не должен сам удалять данные игры (iPhone чистит данные сайтов, которыми давно не пользовались)
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+// копия профиля: имя, аватар, монеты, статистика, колода — кодом (перенести во вкладку/ярлык или на другой телефон)
+function profCode(){var o={v:1,id:me.id,name:me.name,av:me.avatar,prof:prof,deck:store.get("kz_deck")||"0"};
+  return "KZP1:"+btoa(unescape(encodeURIComponent(JSON.stringify(o))))}
+function exportProf(){var c=profCode();
+  overlay('<h2>Копия профиля</h2><div class="dim">Сохраните этот код (например, отправьте себе в мессенджер). На другом телефоне или в ярлыке «На экран „Домой“» — «Восстановить» и вставить код.</div><textarea id="pcode" readonly style="width:100%;height:110px;margin:8px 0;font-size:11px;background:rgba(0,0,0,.3);color:#fff;border-radius:10px">'+c+'</textarea>'+
+    '<div class="row" style="justify-content:center"><button onclick="kzShareProf()">📤 Отправить</button><button class="sec" onclick="$(\'pcode\').select();try{navigator.clipboard.writeText($(\'pcode\').value);toast(\'Скопировано\')}catch(e){}">📋 Копировать</button><button class="sec" onclick="overlay(\'\')">Закрыть</button></div>')}
+function kzShareProf(){var c=profCode();try{if(navigator.share){navigator.share({title:"Козырь — копия профиля",text:c});return}}catch(e){}try{navigator.clipboard.writeText(c);toast("Скопировано")}catch(e){}}
+function importProf(){overlay('<h2>Восстановить профиль</h2><div class="dim">Вставьте код копии профиля. Текущие монеты и статистика на этом телефоне заменятся.</div><textarea id="pin" style="width:100%;height:110px;margin:8px 0;font-size:11px;background:rgba(0,0,0,.3);color:#fff;border-radius:10px"></textarea>'+
+  '<div class="row" style="justify-content:center"><button onclick="kzDoImport()">Восстановить</button><button class="sec" onclick="overlay(\'\')">Отмена</button></div>')}
+function kzDoImport(){try{var t=$("pin").value.trim();if(t.indexOf("KZP1:")!=0)throw 0;var o=JSON.parse(decodeURIComponent(escape(atob(t.slice(5)))));
+  if(o.id)store.set("kz_id",o.id);if(o.name)store.set("kz_name",o.name);if(o.av)store.set("kz_av",o.av);if(o.prof)store.set("kz_prof",JSON.stringify(o.prof));if(o.deck)store.set("kz_deck",o.deck);
+  overlay("");toast("Профиль восстановлен");setTimeout(function(){location.reload()},700)}catch(e){toast("Это не код копии профиля")}}
 function tot(){var t={g:0,w:0,l:0,d:0};for(var k in prof.by){var b=prof.by[k];t.g+=b.g;t.w+=b.w;t.l+=b.l;t.d+=b.d}return t}
 function card(){var t=tot();return {coins:prof.coins,games:t.g,wins:t.w,fools:t.l,draws:t.d,achievements:[],gifts:prof.gifts||0}}
 function applyResult(r){
@@ -267,7 +283,8 @@ function renderStats(){
     return '<tr><td>'+g[1]+'</td><td>🤖 '+b.g+'/'+b.w+'</td><td>👫 '+f.g+'/'+f.w+'</td></tr>'}).join("");
   $("statsBox").innerHTML='<h2>Статистика</h2><div>🪙 <b style="color:var(--gold)">'+prof.coins+'</b> &nbsp; 🎮 '+t.g+' &nbsp; 🏆 '+t.w+' &nbsp; 🤡 '+t.l+' &nbsp; 🤝 '+t.d+' &nbsp; 🔥 лучшая серия '+prof.best+'</div>'+
     '<table class="stats" style="margin-top:6px"><tr class="dim"><td></td><td>с ботами (игр/побед)</td><td>с друзьями</td></tr>'+rows+'</table>'+
-    '<div class="row" style="margin-top:8px"><button class="sec" onclick="topUp()">Добрать 1000 🪙</button><span class="dim">подарков получено: '+(prof.gifts||0)+'</span></div>';
+    '<div class="row" style="margin-top:8px"><button class="sec" onclick="topUp()">Добрать 1000 🪙</button><span class="dim">подарков получено: '+(prof.gifts||0)+'</span></div>'+
+    '<div class="row" style="margin-top:8px"><button class="sec" style="flex:1;font-size:14px" onclick="exportProf()">📤 Копия профиля</button><button class="sec" style="flex:1;font-size:14px" onclick="importProf()">📥 Восстановить</button></div>';
 }
 function topUp(){prof.coins+=1000;saveProf();sfx("chip");toast("+1000 🪙");if($("setup").classList.contains("on"))renderStats();if(lobby)renderLobby();updCoins()}
 function updCoins(){$("coinsTop").textContent="🪙"+prof.coins;$("coins").textContent="🪙"+prof.coins}
@@ -519,9 +536,11 @@ var MODE3D=store.get("kz_3d")=="1";
 function toggle3d(){MODE3D=!MODE3D;store.set("kz_3d",MODE3D?"1":"0");render()}
 function apply3d(v){
   var tb=$("table"),g=$("game");$("m3dBtn").style.background=MODE3D?"rgba(255,201,74,.45)":"";
-  g.classList.toggle("m3d",MODE3D);tb.classList.toggle("t3d",MODE3D);$("hand").classList.toggle("fan",MODE3D);
-  if(!MODE3D){g.style.backgroundImage="";return}
+  var on=MODE3D&&window.innerHeight>window.innerWidth;   // в горизонтальном положении — обычный стол
+  g.classList.toggle("m3d",on);tb.classList.toggle("t3d",on);$("hand").classList.toggle("fan",on);
+  if(!on){g.style.backgroundImage="";return}
   var th=themeOf(deckStyleNow());tb.style.background="";
+  tb.classList.toggle("noroom",!(th&&th.room)&&!store.get("kz_bg"));
   g.style.backgroundImage=th&&th.room?("linear-gradient(rgba(0,0,0,.1),rgba(0,0,0,.5)),url(decks/"+th.id+"/room.webp)"):"";
   var pl=document.createElement("div");pl.className="plane";var own=store.get("kz_bg");if(own||th)pl.style.backgroundImage="url("+(own||("decks/"+th.id+"/table.webp"))+")";
   tb.insertBefore(pl,tb.firstChild);
@@ -552,10 +571,13 @@ function seatPoint(tb,p,my){
 }
 function arrow3d(tb,from,to,my){
   var a=seatPoint(tb,from,my),b=seatPoint(tb,to,my);if(!a||!b)return;
-  var mx=(a.x+b.x)/2,my2=Math.min(a.y,b.y)+Math.abs(a.x-b.x)*0.25+60;
-  var dx=b.x-mx,dy=b.y-my2,l=Math.sqrt(dx*dx+dy*dy)||1,ex=b.x-dx/l*34,ey=b.y-dy/l*34;
+  // дугой в сторону от центра стола (там карты): изгиб вбок на треть длины, к правому краю
+  var dx=b.x-a.x,dy=b.y-a.y,l=Math.sqrt(dx*dx+dy*dy)||1,px=-dy/l,py=dx/l;if(px<0){px=-px;py=-py}
+  var cx=(a.x+b.x)/2+px*l*0.45,cy=(a.y+b.y)/2+py*l*0.45;
+  var sx=a.x+(cx-a.x)/l*40,sy=a.y+(cy-a.y)/l*40;                        // начало — не из-под карт в руке
+  var ex=b.x+(cx-b.x)/l*46,ey=b.y+(cy-b.y)/l*46;                        // конец — у края аватара
   var svg='<svg class="arrows"><defs><marker id="ah" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ffc94a"/></marker></defs>'+
-    '<path d="M'+a.x+','+a.y+' Q'+mx+','+my2+' '+ex+','+ey+'" stroke="#ffc94a" stroke-width="4" fill="none" stroke-dasharray="10 7" marker-end="url(#ah)" opacity=".9"/></svg>';
+    '<path d="M'+sx+','+sy+' Q'+cx+','+cy+' '+ex+','+ey+'" stroke="#ffc94a" stroke-width="3" fill="none" stroke-dasharray="9 7" marker-end="url(#ah)" opacity=".75"/></svg>';
   tb.insertAdjacentHTML("beforeend",svg);
 }
 
