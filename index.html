@@ -179,7 +179,7 @@ svg.arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;
 
 <!-- ============ Столы ============ -->
 <div id="rooms" class="screen">
-  <div class="top"><div class="ib" onclick="show('setup')">👤</div><div class="t">Столы в сети</div><div id="coinsTop" style="color:var(--gold);font-weight:700"></div><div class="ib" onclick="loadRooms()">⟳</div></div>
+  <div class="top"><div class="ib" onclick="show('setup')">👤</div><div class="t">Столы в сети</div><div id="coinsTop" style="color:var(--gold);font-weight:700"></div><div class="ib" onclick="show('online')" title="Онлайн">🌐</div><div class="ib" onclick="loadRooms()">⟳</div></div>
   <div class="scroll">
     <div id="installHint" class="banner" style="display:none">📲 Добавьте «Козырь» на экран «Домой»: кнопка «Поделиться» <b>⬆︎</b> внизу Safari → «На экран „Домой“». Появится иконка, игра будет открываться на весь экран.</div>
     <div class="banner andHint" style="display:none">🤖 У вас Android? <a href="/Kozyr.apk" style="color:var(--gold);font-weight:700">Скачать приложение «Козырь»</a> (~7 МБ) — с ним можно и самому создавать столы. А играть можно и прямо здесь. Чтобы вернуться одним нажатием: меню Chrome <b>⋮</b> → «Добавить на главный экран» (работает, пока вы в сети хозяина стола).</div>
@@ -187,6 +187,18 @@ svg.arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;
     <div class="panel"><h2>Другой стол по адресу</h2><div class="row"><input id="addrIn" placeholder="например 192.168.43.1"><button onclick="goAddr()">→</button></div>
       <div class="dim" style="margin-top:6px">Адрес показан у хоста (на телефоне — в лобби, на ПК — в окне «Козырь»).</div></div>
     <div class="dim">Столы создаются на Android-телефонах (кнопка «Создать стол»). Чтобы играть, будьте в одной Wi‑Fi сети или на точке доступа хоста.</div>
+  </div>
+</div>
+
+<!-- ============ Онлайн ============ -->
+<div id="online" class="screen">
+  <div class="top"><div class="ib" onclick="show(window.KZ_ONLINE_HERE?'setup':'rooms')">←</div><div class="t">🌐 Онлайн</div><div class="ib" onclick="loadOnline()">⟳</div></div>
+  <div class="scroll">
+    <div id="onlineState" class="dim" style="margin:4px 0 8px"></div>
+    <button id="onlineCreateBtn" style="width:100%;margin:0 0 10px;padding:16px" onclick="onlineCreate()">➕ Создать комнату</button>
+    <div id="onlineList" class="list"></div>
+    <div class="panel"><h2>Адрес сервера</h2><div class="row"><input id="onlineIn" placeholder="ссылка от хозяина сервера"><button onclick="onlineSet()">→</button></div>
+      <div class="dim" style="margin-top:6px">Онлайн-комнаты держит компьютер хозяина («Козырь-онлайн»). Он присылает ссылку — откройте её или вставьте сюда, адрес запомнится. Играть можно с iPhone, Android и ПК, из любой сети, пока его компьютер включён.</div></div>
   </div>
 </div>
 
@@ -310,7 +322,7 @@ document.addEventListener("visibilitychange",function(){if(document.visibilitySt
 
 var ws=null, lobby=null, st=null, wantOpen=false, sel=null, bubbles={}, lastHand="", lastSeq=-1, reconnectTry=0;
 
-function show(id){var s=document.querySelectorAll(".screen");for(var i=0;i<s.length;i++)s[i].classList.remove("on");$(id).classList.add("on");if(id=="setup"){renderSetup();renderStats()}if(id=="rooms"){loadRooms();updCoins();
+function show(id){var s=document.querySelectorAll(".screen");for(var i=0;i<s.length;i++)s[i].classList.remove("on");$(id).classList.add("on");if(id=="setup"){renderSetup();renderStats()}if(id=="online")loadOnline();if((id=="rooms"||id=="online")&&pendingRoom&&me.name&&ONLINE){var pr=pendingRoom;pendingRoom=null;setTimeout(function(){joinOnline(pr)},0)}if(id=="rooms"){loadRooms();updCoins();
   var ios=/iPhone|iPad|iPod/.test(navigator.userAgent);var standalone=window.navigator.standalone||matchMedia("(display-mode: standalone)").matches;$("installHint").style.display=ios&&!standalone?"block":"none"}
   var andr=/Android/i.test(navigator.userAgent)&&!window.KZ_PWA&&!/wv\)/.test(navigator.userAgent);var hs=document.querySelectorAll(".andHint");for(var j=0;j<hs.length;j++)hs[j].style.display=andr?"block":"none"}
 function toast(t){var e=$("toast");e.textContent=t;e.style.display="block";clearTimeout(toast.t);toast.t=setTimeout(function(){e.style.display="none"},2600)}
@@ -332,7 +344,7 @@ function renderSetup(){
 }
 function saveSetup(){
   var n=$("nameIn").value.trim();if(!n){toast("Введите имя");return}
-  me.name=n.slice(0,20);store.set("kz_name",me.name);store.set("kz_av",me.avatar);show("rooms");
+  me.name=n.slice(0,20);store.set("kz_name",me.name);store.set("kz_av",me.avatar);show(window.KZ_ONLINE_HERE?"online":"rooms");
 }
 
 // ---------------- столы ----------------
@@ -355,17 +367,64 @@ function joinRoom(r){
   connect();
 }
 
+// ---------------- онлайн: комнаты на сервере хозяина (Козырь-онлайн на ПК + туннель в интернет) ----------------
+var KZ_WEB="https://zhuikoavi.github.io/kozyr-web/", KZ_DISK="https://yadi.sk/d/cXV0uHcvnpufew";
+var ONLINE=store.get("kz_online")||"", onlineRoom=null, pendingRoom=null, onlineTried=false;
+function homeScr(){var o=onlineRoom;onlineRoom=null;return o?"online":(window.KZ_ONLINE_HERE?"online":"rooms")}
+function normOnline(t){t=String(t||"").trim();var m=t.match(/[?#&]online=([^&#\s]+)/);if(m)t=decodeURIComponent(m[1]);var r=t.match(/[?#&]room=([a-z0-9]+)/);if(r)pendingRoom=r[1];
+  if(!t)return "";if(!/^https?:\/\//.test(t))t="https://"+t;var a=t.match(/^(https?:\/\/[^\/?#]+)/);return a?a[1]:""}
+function setOnline(u){ONLINE=u;store.set("kz_online",u)}
+function onlineSet(){var u=normOnline($("onlineIn").value);if(!u){toast("Вставьте ссылку");return}setOnline(u);$("onlineIn").value="";loadOnline()}
+function onlineInvite(){return ONLINE.indexOf("https://")==0?KZ_WEB+"?online="+encodeURIComponent(ONLINE)+"&room="+onlineRoom:ONLINE+"/?room="+onlineRoom}
+function shareInvite(){var u=onlineInvite(),t="♠ Заходи ко мне за стол в «Козырь» ("+(lobby?lobby.roomName:"онлайн")+"): дурак и покер. Открой ссылку — работает на iPhone, Android и ПК:";
+  if(navigator.share)navigator.share({title:"Козырь",text:t,url:u}).catch(function(){});else copyText(t+" "+u)}
+function copyText(t){try{navigator.clipboard.writeText(t).then(function(){toast("Скопировано")},function(){prompt("Скопируйте:",t)})}catch(e){prompt("Скопируйте:",t)}}
+/** Свежий адрес сервера: его пишет «Козырь-онлайн» в update-info.json на Яндекс.Диске (адрес туннеля меняется при перезапуске). */
+function discoverOnline(cb){
+  try{fetch("https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key="+encodeURIComponent(KZ_DISK)+"&path=%2Fupdate-info.json")
+    .then(function(r){return r.json()}).then(function(j){return fetch(j.href)}).then(function(r){return r.json()})
+    .then(function(i){cb(i&&i.online||"")},function(){cb("")})}catch(e){cb("")}
+}
+function loadOnline(){
+  var l=$("onlineList"),stt=$("onlineState");$("onlineCreateBtn").style.display=ONLINE?"":"none";
+  if(!ONLINE){l.innerHTML="";stt.innerHTML="Ищем сервер…";discoverOnline(function(u){if(u){setOnline(u);loadOnline()}else stt.innerHTML="Сервер не найден. Попросите у хозяина ссылку и вставьте её ниже."});return}
+  stt.textContent="Сервер: "+ONLINE.replace(/^https?:\/\//,"");if(!l.children.length)l.innerHTML='<div class="dim">Загружаем комнаты…</div>';
+  var x=new XMLHttpRequest();x.open("GET",ONLINE+"/api/rooms");x.timeout=12000;
+  x.onload=function(){var d;try{d=JSON.parse(x.responseText)}catch(e){d=null}if(!d||!d.rooms){x.onerror();return}onlineTried=false;
+    l.innerHTML="";if(!d.rooms.length)l.innerHTML='<div class="dim">Комнат пока нет — создайте свою и позовите друзей.</div>';
+    d.rooms.forEach(function(r){var e=document.createElement("div");e.className="it";
+      e.innerHTML='<b>'+esc(r.roomName)+'</b><div class="dim">'+esc(r.title)+' · игроков '+r.players+'/'+r.max+(r.started?' · идёт игра':'')+'</div>';
+      e.onclick=function(){joinOnline(r.id)};l.appendChild(e)});
+    $("onlineCreateBtn").style.display=d.rooms.length>=(d.max||20)?"none":"";
+    stt.textContent="Сервер: "+(d.server||ONLINE.replace(/^https?:\/\//,""))+" · комнат "+d.rooms.length+" из "+(d.max||20)};
+  x.onerror=x.ontimeout=function(){
+    if(!onlineTried){onlineTried=true;stt.textContent="Сервер не отвечает, ищем новый адрес…";
+      discoverOnline(function(u){if(u&&u!=ONLINE){setOnline(u);loadOnline()}else{l.innerHTML="";stt.innerHTML="Сервер не отвечает — компьютер хозяина выключен или адрес сменился. Попросите свежую ссылку."}});return}
+    l.innerHTML="";stt.innerHTML="Сервер не отвечает — компьютер хозяина выключен или адрес сменился. Попросите свежую ссылку."};
+  x.send();
+}
+function onlineCreate(){
+  var n=prompt("Название комнаты",me.name+": стол");if(n==null)return;n=n.trim().slice(0,30)||(me.name+": стол");
+  var x=new XMLHttpRequest();x.open("GET",ONLINE+"/api/create?name="+encodeURIComponent(n));x.timeout=12000;
+  x.onload=function(){var d;try{d=JSON.parse(x.responseText)}catch(e){d={}}if(d.id)joinOnline(d.id);else{toast(d.error||"Не удалось создать комнату");loadOnline()}};
+  x.onerror=x.ontimeout=function(){toast("Сервер не отвечает")};x.send();
+}
+function joinOnline(id){if(!me.name){pendingRoom=id;show("setup");return}onlineRoom=id;lastSeq=-1;reconnectTry=0;connect()}
+(function(){var q=location.search+location.hash;if(window.KZ_ONLINE_HERE){setOnline(location.origin);var r=q.match(/[?#&]room=([a-z0-9]+)/);if(r)pendingRoom=r[1]}
+  else if(/[?#&]online=/.test(q)){var u=normOnline(q);if(u)setOnline(u)}
+  if(/[?&](online|room)=/.test(location.search)){try{history.replaceState(null,"",location.pathname)}catch(e){}}})();
+
 // ---------------- сеть ----------------
 function connect(){
   wantOpen=true;
-  try{ws=new WebSocket("ws://"+location.host+"/ws")}catch(e){toast("Не удалось подключиться");return}
+  try{ws=new WebSocket(onlineRoom?ONLINE.replace(/^http/,"ws")+"/ws?room="+onlineRoom:"ws://"+location.host+"/ws")}catch(e){toast("Не удалось подключиться");return}
   ws.onopen=function(){reconnectTry=0;send({t:"hello",id:me.id,name:me.name,avatar:me.avatar,version:PROTO,deckStyle:myDeck(),profile:card()})};
   ws.onmessage=function(ev){var m;try{m=JSON.parse(ev.data)}catch(e){return}onMsg(m)};
-  ws.onclose=function(){ws=null;if(wantOpen&&reconnectTry<6){reconnectTry++;toast("Связь потеряна, переподключаемся…");setTimeout(connect,1500*reconnectTry)}else if(wantOpen){wantOpen=false;show("rooms")}};
+  ws.onclose=function(){ws=null;if(wantOpen&&reconnectTry<6){reconnectTry++;toast("Связь потеряна, переподключаемся…");setTimeout(connect,1500*reconnectTry)}else if(wantOpen){wantOpen=false;show(homeScr())}};
 }
 function send(o){if(ws&&ws.readyState==1)ws.send(JSON.stringify(o))}
 function act(a){send({t:"act",action:a})}
-function leave(){wantOpen=false;send({t:"leave"});try{ws&&ws.close()}catch(e){}lobby=null;st=null;show("rooms")}
+function leave(){wantOpen=false;send({t:"leave"});try{ws&&ws.close()}catch(e){}lobby=null;st=null;show(homeScr())}
 function surrender(){if(confirm("Сдаться? Партия будет проиграна."))act({t:"surrender"})}
 function togglePause(){if(st)send({t:"pause",on:!st.paused})}
 
@@ -379,7 +438,7 @@ function onMsg(m){
     case "gift":bubble(m.to,m.gift);sfx("win");if(m.to==mySeat()){prof.gifts=(prof.gifts||0)+1;saveProf()}toast(seatName(m.from)+" дарит "+(m.to==mySeat()?"вам":seatName(m.to))+" "+m.gift);break;
     case "result":applyResult(m.result);updCoins();break;
     case "toast":toast(fmt(m.text));break;
-    case "closed":wantOpen=false;alert(m.reason);show("rooms");break;
+    case "closed":wantOpen=false;alert(m.reason);show(homeScr());break;
   }
 }
 function track(o,n){
@@ -408,7 +467,9 @@ function renderLobby(){
     (function(p){d.onclick=function(){send({t:"sit",pos:p})}})(pos);sp.appendChild(d)}
   var admin=isAdmin();
   $("lobbyList").innerHTML=lobby.seats.map(function(s,i){return '<div class="row" style="margin:4px 0">'+avHtml(s,"")+'<div style="flex:1"><b>'+esc(s.name)+'</b><div class="dim">'+(s.host?"хост":s.bot?"бот":"игрок")+'</div></div>'+(admin&&!s.host?'<span style="color:var(--danger);font-size:22px;padding:6px" onclick="admin(\'remove\',null,'+i+')">✕</span>':"")+'</div>'}).join("");
-  var url="http://"+location.host+"/";$("inviteUrl").textContent=url;$("inviteQr").src="/qr.svg?u="+encodeURIComponent(url);
+  if(onlineRoom){var ou=onlineInvite();$("inviteUrl").innerHTML=esc(ou)+'<br><button style="margin-top:6px;padding:8px 12px;font-size:14px" onclick="shareInvite()">📤 Позвать друзей</button> <button class="sec" style="margin-top:6px;padding:8px 12px;font-size:14px" onclick="copyText(onlineInvite())">📋 Скопировать</button>';
+    $("inviteQr").style.display="";$("inviteQr").src=ONLINE+"/qr.svg?u="+encodeURIComponent(ou)}
+  else{var url="http://"+location.host+"/";$("inviteUrl").textContent=url;$("inviteQr").src="/qr.svg?u="+encodeURIComponent(url)}
   $("waitTxt").style.display=admin?"none":"block";
   $("adminBox").innerHTML=admin?adminHtml(lobby.settings):"";
   var stake=lobby.settings.type=="POKER"?(lobby.settings.poker.rebuy?0:lobby.settings.poker.stake):lobby.settings.durak.stake;
@@ -721,7 +782,7 @@ function bestHand(cs){
 window.addEventListener("resize",function(){if(st)render();else if(lobby)renderLobby()});
 // старт
 // веб-версия без Android-хоста (web/site/pwa.js) запускается сама
-if(!window.KZ_PWA){if(!me.name)show("setup");else{show("rooms");if(/join=1/.test(location.search))connect()}}
+if(!window.KZ_PWA){if(!me.name)show("setup");else{show(window.KZ_ONLINE_HERE?"online":"rooms");if(/join=1/.test(location.search))connect()}}
 window.__kz={get st(){return st},get lobby(){return lobby},act:act,send:send};
 </script>
 <script src="vendor/qrcode.js"></script>

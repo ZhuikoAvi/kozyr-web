@@ -8,7 +8,7 @@
  */
 "use strict";
 (function () {
-  var VERSION = "1.22";
+  var VERSION = "1.24";
   var mode = null;          // null | "host" | "guest"
   var hostObj = null, localLink = null, peers = [], pending = null;
   var guestPc = null, guestDc = null;
@@ -258,14 +258,19 @@
   // ---------------------------------------------------------------- подмена сети index.html
   function hello() { window.send({ t: "hello", id: me.id, name: me.name, avatar: me.avatar, version: PROTO, deckStyle: myDeck(), profile: card() }) }
 
+  // онлайн-комнаты (index.html: onlineRoom/ONLINE) идут обычным WebSocket — как у страницы Android-хоста
+  var origSend = window.send, origConnect = window.connect, origLeave = window.leave;
+  function online() { return !!window.onlineRoom }
   window.send = function (o) {
+    if (online()) return origSend(o);
     var t = JSON.stringify(o);
     if (mode == "host" && localLink) localLink.receive(t);
     else if (mode == "guest" && guestDc && guestDc.readyState == "open") { try { guestDc.send(t) } catch (e) {} }
   };
-  window.connect = function () {};
+  window.connect = function () { if (online()) { dropGuest(); if (mode == "host") closeHost(); mode = null; origConnect() } };
   window.loadRooms = function () {};
   window.leave = function () {
+    if (online()) return origLeave();
     if (mode == "host") {
       if (!confirm("Закрыть стол? Все гости отключатся.")) return;
       closeHost();
@@ -289,6 +294,7 @@
   var origRenderLobby = window.renderLobby;
   window.renderLobby = function () {
     origRenderLobby();
+    if (online()) { var kb = $("kzInv"); if (kb) kb.innerHTML = ""; var ip = $("inviteQr"); if (ip) ip.parentNode.style.display = ""; $("inviteUrl").style.display = ""; return }
     var img = $("inviteQr"); if (img) { img.removeAttribute("src"); img.style.display = "none" }
     var url = $("inviteUrl"); if (url) url.style.display = "none";
     var box = $("kzInv");
@@ -304,7 +310,7 @@
   var origRender = window.render;
   window.render = function () {
     origRender();
-    var b = $("kzInvBtn"); if (b) b.style.display = mode == "host" ? "flex" : "none";
+    var b = $("kzInvBtn"); if (b) b.style.display = mode == "host" && !online() ? "flex" : "none";
   };
 
   // ---------------------------------------------------------------- главный экран
@@ -316,6 +322,7 @@
       '<div id="installHint" class="banner" style="display:none">📲 Добавьте «Козырь» на экран «Домой»: кнопка «Поделиться» <b>⬆︎</b> внизу Safari → «На экран „Домой“». Тогда игра откроется и без интернета.</div>' +
       '<button style="width:100%;margin:6px 0 10px;padding:16px" onclick="kzHost()">🃏 Создать стол</button>' +
       '<button class="blue" style="width:100%;padding:16px" onclick="kzJoin()">📷 Присоединиться к столу</button>' +
+      '<button class="sec" style="width:100%;margin-top:10px;padding:16px" onclick="show(\'online\')">🌐 Играть онлайн (через интернет)</button>' +
       '<div class="panel" style="margin-top:14px"><h2>Как играть вместе</h2><div class="dim" style="font-size:14px;line-height:1.45">' +
       '1. Все телефоны — в одной Wi‑Fi сети или на точке доступа одного из телефонов. Интернет не нужен.<br>' +
       '2. Один жмёт «Создать стол», в лобби — «➕ Пригласить игрока» и показывает QR-код.<br>' +
