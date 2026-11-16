@@ -418,13 +418,18 @@ function joinOnline(id){if(!me.name){pendingRoom=id;show("setup");return}onlineR
 function connect(){
   wantOpen=true;
   try{ws=new WebSocket(onlineRoom?ONLINE.replace(/^http/,"ws")+"/ws?room="+onlineRoom:"ws://"+location.host+"/ws")}catch(e){toast("Не удалось подключиться");return}
-  ws.onopen=function(){reconnectTry=0;send({t:"hello",id:me.id,name:me.name,avatar:me.avatar,version:PROTO,deckStyle:myDeck(),profile:card()})};
+  ws.onopen=function(){reconnectTry=0;connInd(1);send({t:"hello",id:me.id,name:me.name,avatar:me.avatar,version:PROTO,deckStyle:myDeck(),profile:card()})};
   ws.onmessage=function(ev){var m;try{m=JSON.parse(ev.data)}catch(e){return}onMsg(m)};
-  ws.onclose=function(){ws=null;if(wantOpen&&reconnectTry<6){reconnectTry++;toast("Связь потеряна, переподключаемся…");setTimeout(connect,1500*reconnectTry)}else if(wantOpen){wantOpen=false;show(homeScr())}};
+  ws.onclose=function(){ws=null;if(wantOpen&&reconnectTry<6){reconnectTry++;connInd(2);setTimeout(connect,1500*reconnectTry)}else{connInd(0);if(wantOpen){wantOpen=false;toast("Нет связи с хостом");show(homeScr())}}};
 }
+/** Значок связи вверху: 0 — скрыт, 1 — на связи, 2 — связь прервалась (перечёркнут), идёт переподключение. */
+function connInd(k){var e=$("connInd");if(!e){e=document.createElement("div");e.id="connInd";
+  e.style.cssText="position:fixed;top:calc(env(safe-area-inset-top,0px) + 4px);left:50%;transform:translateX(-50%);z-index:50;width:28px;height:28px;border-radius:14px;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:14px;pointer-events:none";
+  document.body.appendChild(e)}
+  e.style.display=k?"flex":"none";e.innerHTML=(onlineRoom?"🌐":"📶")+(k==2?'<svg viewBox="0 0 28 28" style="position:absolute;inset:0"><line x1="5" y1="5" x2="23" y2="23" stroke="#ff4d4d" stroke-width="3" stroke-linecap="round"/></svg>':"");e.style.opacity=k==2?"1":".8"}
 function send(o){if(ws&&ws.readyState==1)ws.send(JSON.stringify(o))}
 function act(a){send({t:"act",action:a})}
-function leave(){wantOpen=false;send({t:"leave"});try{ws&&ws.close()}catch(e){}lobby=null;st=null;show(homeScr())}
+function leave(){wantOpen=false;connInd(0);send({t:"leave"});try{ws&&ws.close()}catch(e){}lobby=null;st=null;show(homeScr())}
 function surrender(){if(confirm("Сдаться? Партия будет проиграна."))act({t:"surrender"})}
 function togglePause(){if(st)send({t:"pause",on:!st.paused})}
 
@@ -438,7 +443,7 @@ function onMsg(m){
     case "gift":bubble(m.to,m.gift);sfx("win");if(m.to==mySeat()){prof.gifts=(prof.gifts||0)+1;saveProf()}toast(seatName(m.from)+" дарит "+(m.to==mySeat()?"вам":seatName(m.to))+" "+m.gift);break;
     case "result":applyResult(m.result);updCoins();break;
     case "toast":toast(fmt(m.text));break;
-    case "closed":wantOpen=false;alert(m.reason);show(homeScr());break;
+    case "closed":wantOpen=false;connInd(0);alert(m.reason);show(homeScr());break;
   }
 }
 function track(o,n){
